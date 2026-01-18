@@ -124,6 +124,7 @@ const redirectUtmLink = async (req, res) => {
         // Capture request metadata for tracking
         console.log('[UTM Tracking] Starting IP extraction and geolocation tracking');
         console.log('[UTM Tracking] Request headers:', {
+            'x-client-real-ip': req.headers['x-client-real-ip'], // Custom header from Next.js
             'x-forwarded-for': req.headers['x-forwarded-for'],
             'x-real-ip': req.headers['x-real-ip'],
             'cf-connecting-ip': req.headers['cf-connecting-ip'],
@@ -167,22 +168,34 @@ const redirectUtmLink = async (req, res) => {
         let ipAddress = null;
         let ipSource = 'none';
         
-        // 1. First try x-forwarded-for header (contains client IP in production with proxies)
+        // 0. FIRST PRIORITY: Custom header from Next.js (x-client-real-ip)
+        // This is set by Next.js with the real client IP and won't be overwritten by internal proxies
+        const clientRealIp = req.headers['x-client-real-ip'];
+        if (clientRealIp && !isLocalhostOrPrivate(clientRealIp)) {
+          ipAddress = clientRealIp;
+          ipSource = 'x-client-real-ip (from Next.js)';
+          console.log('[UTM Tracking] Using x-client-real-ip (Next.js):', ipAddress);
+        }
+        
+        // 1. Try x-forwarded-for header (contains client IP in production with proxies)
         // The format is usually: "client-ip, proxy1-ip, proxy2-ip"
-        const forwardedFor = req.headers['x-forwarded-for'];
-        if (forwardedFor) {
-          const ips = typeof forwardedFor === 'string' 
-            ? forwardedFor.split(',').map(ip => ip.trim())
-            : [forwardedFor];
-          
-          console.log('[UTM Tracking] x-forwarded-for IPs:', ips);
-          
-          // Find first non-private IP (client's real IP is usually first)
-          for (const ip of ips) {
-            if (ip && !isLocalhostOrPrivate(ip)) {
-              ipAddress = ip;
-              ipSource = 'x-forwarded-for';
-              break;
+        // Only check this if we didn't get IP from x-client-real-ip
+        if (!ipAddress || isLocalhostOrPrivate(ipAddress)) {
+          const forwardedFor = req.headers['x-forwarded-for'];
+          if (forwardedFor) {
+            const ips = typeof forwardedFor === 'string' 
+              ? forwardedFor.split(',').map(ip => ip.trim())
+              : [forwardedFor];
+            
+            console.log('[UTM Tracking] x-forwarded-for IPs:', ips);
+            
+            // Find first non-private IP (client's real IP is usually first)
+            for (const ip of ips) {
+              if (ip && !isLocalhostOrPrivate(ip)) {
+                ipAddress = ip;
+                ipSource = 'x-forwarded-for';
+                break;
+              }
             }
           }
         }

@@ -25,6 +25,11 @@ const getIpGeolocation = async (ipAddress) => {
     cleanIp = cleanIp.split(':')[0]
   }
 
+  // Remove IPv6 mapping prefix ::ffff: if present (e.g., ::ffff:10.0.1.14 -> 10.0.1.14)
+  if (cleanIp && cleanIp.startsWith('::ffff:')) {
+    cleanIp = cleanIp.replace(/^::ffff:/, '')
+  }
+
   console.log('[ipGeolocation] Cleaned IP:', cleanIp)
 
   // If no IP, return null (but don't skip private IPs - controller handles getting public IP)
