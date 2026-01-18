@@ -18,6 +18,7 @@
     "express": "^5.2.1",
     "pg": "^8.17.1",
     "pg-hstore": "^2.3.4",
+    "public-ip": "^8.0.0",
     "sequelize": "^6.37.7"
   },
   "devDependencies": {

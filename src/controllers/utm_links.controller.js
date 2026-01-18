@@ -3,6 +3,7 @@ const { generateUniqueCodeWithRetry } = require('../utils/generateCode');
 const { getPaginationParams, sendPaginatedResponse } = require('../utils/pagination');
 const { parseUserAgent } = require('../utils/userAgentParser');
 const { getIpGeolocation } = require('../utils/ipGeolocation');
+const {publicIpv4} = require('public-ip');
 
 const getUtmLinks = async (req, res) => {
     try {
@@ -125,42 +126,63 @@ const redirectUtmLink = async (req, res) => {
         // Extract IP address - handle production environments with proxies/load balancers
         let ipAddress = req.ip;
         
-        // Helper function to check if IP is localhost
-        const isLocalhost = (ip) => {
+        // Helper function to check if IP is localhost or private
+        const isLocalhostOrPrivate = (ip) => {
           if (!ip) return true;
           // Remove IPv6 mapping prefix if present
           const cleaned = ip.replace(/^::ffff:/, '');
-          return cleaned === '::1' || cleaned === '127.0.0.1' || cleaned === 'localhost';
+          return cleaned === '::1' || 
+                 cleaned === '127.0.0.1' || 
+                 cleaned === 'localhost' ||
+                 cleaned.startsWith('192.168.') || 
+                 cleaned.startsWith('10.') || 
+                 cleaned.startsWith('172.16.') ||
+                 cleaned.startsWith('172.17.') ||
+                 cleaned.startsWith('172.18.') ||
+                 cleaned.startsWith('172.19.') ||
+                 cleaned.startsWith('172.20.') ||
+                 cleaned.startsWith('172.21.') ||
+                 cleaned.startsWith('172.22.') ||
+                 cleaned.startsWith('172.23.') ||
+                 cleaned.startsWith('172.24.') ||
+                 cleaned.startsWith('172.25.') ||
+                 cleaned.startsWith('172.26.') ||
+                 cleaned.startsWith('172.27.') ||
+                 cleaned.startsWith('172.28.') ||
+                 cleaned.startsWith('172.29.') ||
+                 cleaned.startsWith('172.30.') ||
+                 cleaned.startsWith('172.31.');
         };
         
-        if (!ipAddress || isLocalhost(ipAddress)) {
+        if (!ipAddress || isLocalhostOrPrivate(ipAddress)) {
           // Try x-forwarded-for header (first IP in comma-separated list)
           const forwardedFor = req.headers['x-forwarded-for'];
           if (forwardedFor) {
             const firstIp = typeof forwardedFor === 'string' 
               ? forwardedFor.split(',')[0].trim() 
               : forwardedFor[0];
-            if (firstIp && !isLocalhost(firstIp)) {
+            if (firstIp && !isLocalhostOrPrivate(firstIp)) {
               ipAddress = firstIp;
             }
           }
         }
-        if (!ipAddress || isLocalhost(ipAddress)) {
+        if (!ipAddress || isLocalhostOrPrivate(ipAddress)) {
           // Fallback to x-real-ip header
           const realIp = req.headers['x-real-ip'];
-          if (realIp && !isLocalhost(realIp)) {
+          if (realIp && !isLocalhostOrPrivate(realIp)) {
             ipAddress = realIp;
           }
         }
-        if (!ipAddress || isLocalhost(ipAddress)) {
+        if (!ipAddress || isLocalhostOrPrivate(ipAddress)) {
           // Final fallback to connection remote address
           const remoteAddress = req.connection?.remoteAddress || req.socket?.remoteAddress;
-          if (remoteAddress && !isLocalhost(remoteAddress)) {
+          if (remoteAddress && !isLocalhostOrPrivate(remoteAddress)) {
             ipAddress = remoteAddress;
-          } else if (!ipAddress) {
-            ipAddress = null;
           }
         }
+        
+        // Store original IP for reference
+        const originalIpAddress = ipAddress;
         
         const userAgent = req.headers['user-agent'] || null;
         const referer = req.headers['referer'] || req.headers['referrer'] || null;
@@ -177,15 +199,39 @@ const redirectUtmLink = async (req, res) => {
         // Gets geolocation with timeout to avoid blocking redirect
         const createTrackingRecord = async () => {
             try {
+                // If IP is localhost/private, try to get public IP for geolocation
+                let ipForGeolocation = ipAddress;
+
+                console.log(ipForGeolocation)
+
+
+                if (ipAddress && isLocalhostOrPrivate(ipAddress)) {
+                    try {
+                        // Try to get public IP with timeout
+                        const publicIpPromise = publicIpv4();
+                        const timeoutPromise = new Promise((resolve) => 
+                            setTimeout(() => resolve(null), 1000)
+                        );
+                        const publicIpResult = await Promise.race([publicIpPromise, timeoutPromise]);
+                        if (publicIpResult) {
+                            ipForGeolocation = publicIpResult;
+                            // console.log(`Using public IP ${publicIpResult} for geolocation (original: ${ipAddress})`);
+                        }
+                    } catch (err) {
+                        // If we can't get public IP, still try with localhost IP (might fail, but that's okay)
+                        console.warn('Could not get public IP for geolocation:', err.message);
+                    }
+                }
+                
                 // Try to get geolocation with a short timeout (1.5 seconds max)
                 let geoData = { 
                     full: null,
                     country: null, 
                     city: null 
                 };
-                if (ipAddress) {
+                if (ipForGeolocation) {
                     try {
-                        const geoPromise = getIpGeolocation(ipAddress);
+                        const geoPromise = getIpGeolocation(ipForGeolocation);
                         const timeoutPromise = new Promise((resolve) => 
                             setTimeout(() => resolve({ 
                                 full: null,
@@ -204,12 +250,12 @@ const redirectUtmLink = async (req, res) => {
                 await utm_tracking.create({
                     utm_link_id: utmLink.id,
                     code: utmLink.code,
-                    ip_address: ipAddress,
+                    ip_address: originalIpAddress, // Store original IP from request
                     user_agent: userAgent,
                     referer: referer,
                     country: geoData.country,
                     city: geoData.city,
-                    geodata: geoData.full, // Store full geolocation object
+                    geodata: geoData.full, // Store full geolocation object (from public IP if localhost)
                     device_type: deviceType,
                     browser: browser,
                     os: os,

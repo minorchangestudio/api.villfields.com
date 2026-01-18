@@ -23,29 +23,8 @@ const getIpGeolocation = async (ipAddress) => {
     cleanIp = cleanIp.split(':')[0]
   }
 
-  // Skip local/private IPs
-  if (!cleanIp || 
-      cleanIp === '::1' || 
-      cleanIp === '127.0.0.1' || 
-      cleanIp.startsWith('192.168.') || 
-      cleanIp.startsWith('10.') || 
-      cleanIp.startsWith('172.16.') ||
-      cleanIp.startsWith('172.17.') ||
-      cleanIp.startsWith('172.18.') ||
-      cleanIp.startsWith('172.19.') ||
-      cleanIp.startsWith('172.20.') ||
-      cleanIp.startsWith('172.21.') ||
-      cleanIp.startsWith('172.22.') ||
-      cleanIp.startsWith('172.23.') ||
-      cleanIp.startsWith('172.24.') ||
-      cleanIp.startsWith('172.25.') ||
-      cleanIp.startsWith('172.26.') ||
-      cleanIp.startsWith('172.27.') ||
-      cleanIp.startsWith('172.28.') ||
-      cleanIp.startsWith('172.29.') ||
-      cleanIp.startsWith('172.30.') ||
-      cleanIp.startsWith('172.31.') ||
-      cleanIp === 'localhost') {
+  // If no IP, return null (but don't skip private IPs - controller handles getting public IP)
+  if (!cleanIp) {
     return {
       full: null,
       country: null,
