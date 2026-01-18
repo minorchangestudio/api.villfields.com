@@ -10,8 +10,6 @@
  * @returns {Promise<Object>} Full geolocation data object with country, city, and all fields
  */
 const getIpGeolocation = async (ipAddress) => {
-  console.log('[ipGeolocation] Starting geolocation lookup for IP:', ipAddress)
-  
   // Clean IP address (remove port if present, handle IPv6)
   let cleanIp = ipAddress
   
@@ -30,11 +28,8 @@ const getIpGeolocation = async (ipAddress) => {
     cleanIp = cleanIp.replace(/^::ffff:/, '')
   }
 
-  console.log('[ipGeolocation] Cleaned IP:', cleanIp)
-
   // If no IP, return null (but don't skip private IPs - controller handles getting public IP)
   if (!cleanIp) {
-    console.warn('[ipGeolocation] No IP address provided')
     return {
       full: null,
       country: null,
@@ -45,10 +40,7 @@ const getIpGeolocation = async (ipAddress) => {
   try {
     // Use free ipapi.co service (no API key required for basic usage)
     // Rate limit: 1000 requests/day for free tier
-    const apiUrl = `http://ipapi.co/${cleanIp}/json/`
-    console.log('[ipGeolocation] Calling API:', apiUrl)
-    
-    const response = await fetch(apiUrl, {
+    const response = await fetch(`http://ipapi.co/${cleanIp}/json/`, {
       method: 'GET',
       headers: {
         'User-Agent': 'VillFields-API/1.0'
@@ -57,10 +49,7 @@ const getIpGeolocation = async (ipAddress) => {
       signal: AbortSignal.timeout(2000) // 2 second timeout
     })
 
-    console.log('[ipGeolocation] API response status:', response.status)
-
     if (!response.ok) {
-      console.error('[ipGeolocation] API response not OK:', response.status, response.statusText)
       return { 
         full: null,
         country: null, 
@@ -69,11 +58,9 @@ const getIpGeolocation = async (ipAddress) => {
     }
 
     const data = await response.json()
-    console.log('[ipGeolocation] API response data:', data)
 
     // Handle error responses from ipapi.co
     if (data.error) {
-      console.error('[ipGeolocation] API returned error:', data.error)
       return { 
         full: null,
         country: null, 
@@ -86,26 +73,14 @@ const getIpGeolocation = async (ipAddress) => {
     const countryCode = data.country_code || data.country_code_iso3?.substring(0, 2) || null
     const city = data.city || null
 
-    console.log('[ipGeolocation] Extracted country:', countryCode, 'city:', city)
-    console.log('[ipGeolocation] Full geodata keys:', Object.keys(data))
-
-    const result = {
+    return {
       full: data, // Store the complete geolocation object
       country: countryCode, // ISO 2-letter country code for backward compatibility
       city: city
     }
-    
-    console.log('[ipGeolocation] Returning result:', {
-      hasFullData: !!result.full,
-      country: result.country,
-      city: result.city
-    })
-
-    return result
   } catch (error) {
-    // Log error but don't block redirect
-    console.error('[ipGeolocation] Error during geolocation lookup:', error.message)
-    console.error('[ipGeolocation] Error stack:', error.stack)
+    // Silently fail - don't block redirect if geolocation fails
+    console.error('IP geolocation error:', error.message)
     return {
       full: null,
       country: null,
