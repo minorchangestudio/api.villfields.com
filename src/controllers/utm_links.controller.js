@@ -3,7 +3,6 @@ const { generateUniqueCodeWithRetry } = require('../utils/generateCode');
 const { getPaginationParams, sendPaginatedResponse } = require('../utils/pagination');
 const { parseUserAgent } = require('../utils/userAgentParser');
 const { getIpGeolocation } = require('../utils/ipGeolocation');
-const {publicIpv4} = require('public-ip');
 
 const getUtmLinks = async (req, res) => {
     try {
@@ -202,11 +201,11 @@ const redirectUtmLink = async (req, res) => {
                 // If IP is localhost/private, try to get public IP for geolocation
                 let ipForGeolocation = ipAddress;
 
-                console.log(ipForGeolocation)
-
-
                 if (ipAddress && isLocalhostOrPrivate(ipAddress)) {
                     try {
+                        // Dynamic import for ES module (public-ip v8+)
+                        const { publicIpv4 } = await import('public-ip');
+                        
                         // Try to get public IP with timeout
                         const publicIpPromise = publicIpv4();
                         const timeoutPromise = new Promise((resolve) => 
@@ -215,7 +214,7 @@ const redirectUtmLink = async (req, res) => {
                         const publicIpResult = await Promise.race([publicIpPromise, timeoutPromise]);
                         if (publicIpResult) {
                             ipForGeolocation = publicIpResult;
-                            // console.log(`Using public IP ${publicIpResult} for geolocation (original: ${ipAddress})`);
+                            console.log(`Using public IP ${publicIpResult} for geolocation (original: ${ipAddress})`);
                         }
                     } catch (err) {
                         // If we can't get public IP, still try with localhost IP (might fail, but that's okay)
