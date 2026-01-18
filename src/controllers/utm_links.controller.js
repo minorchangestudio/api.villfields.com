@@ -122,6 +122,18 @@ const redirectUtmLink = async (req, res) => {
         const finalUrl = destinationUrl.toString();
 
         // Capture request metadata for tracking
+        console.log('[UTM Tracking] Starting IP extraction and geolocation tracking');
+        console.log('[UTM Tracking] Request headers:', {
+            'x-forwarded-for': req.headers['x-forwarded-for'],
+            'x-real-ip': req.headers['x-real-ip'],
+            'cf-connecting-ip': req.headers['cf-connecting-ip'],
+            'x-client-ip': req.headers['x-client-ip'],
+            'user-agent': req.headers['user-agent'],
+            'referer': req.headers['referer'] || req.headers['referrer']
+        });
+        console.log('[UTM Tracking] req.ip:', req.ip);
+        console.log('[UTM Tracking] req.connection?.remoteAddress:', req.connection?.remoteAddress);
+        
         // Extract IP address - prioritize headers for production (proxies/load balancers)
         // Helper function to check if IP is localhost or private
         const isLocalhostOrPrivate = (ip) => {
@@ -153,6 +165,7 @@ const redirectUtmLink = async (req, res) => {
 
         // Extract client IP with proper priority for production environments
         let ipAddress = null;
+        let ipSource = 'none';
         
         // 1. First try x-forwarded-for header (contains client IP in production with proxies)
         // The format is usually: "client-ip, proxy1-ip, proxy2-ip"
@@ -162,10 +175,13 @@ const redirectUtmLink = async (req, res) => {
             ? forwardedFor.split(',').map(ip => ip.trim())
             : [forwardedFor];
           
+          console.log('[UTM Tracking] x-forwarded-for IPs:', ips);
+          
           // Find first non-private IP (client's real IP is usually first)
           for (const ip of ips) {
             if (ip && !isLocalhostOrPrivate(ip)) {
               ipAddress = ip;
+              ipSource = 'x-forwarded-for';
               break;
             }
           }
@@ -176,6 +192,7 @@ const redirectUtmLink = async (req, res) => {
           const realIp = req.headers['x-real-ip'];
           if (realIp && !isLocalhostOrPrivate(realIp)) {
             ipAddress = realIp;
+            ipSource = 'x-real-ip';
           }
         }
         
@@ -184,6 +201,7 @@ const redirectUtmLink = async (req, res) => {
           const cfIp = req.headers['cf-connecting-ip'];
           if (cfIp && !isLocalhostOrPrivate(cfIp)) {
             ipAddress = cfIp;
+            ipSource = 'cf-connecting-ip';
           }
         }
         
@@ -192,6 +210,7 @@ const redirectUtmLink = async (req, res) => {
           const clientIp = req.headers['x-client-ip'];
           if (clientIp && !isLocalhostOrPrivate(clientIp)) {
             ipAddress = clientIp;
+            ipSource = 'x-client-ip';
           }
         }
         
@@ -199,6 +218,7 @@ const redirectUtmLink = async (req, res) => {
         if (!ipAddress || isLocalhostOrPrivate(ipAddress)) {
           if (req.ip && !isLocalhostOrPrivate(req.ip)) {
             ipAddress = req.ip;
+            ipSource = 'req.ip';
           }
         }
         
@@ -207,11 +227,16 @@ const redirectUtmLink = async (req, res) => {
           const remoteAddress = req.connection?.remoteAddress || req.socket?.remoteAddress;
           if (remoteAddress && !isLocalhostOrPrivate(remoteAddress)) {
             ipAddress = remoteAddress;
+            ipSource = 'connection.remoteAddress';
           } else if (remoteAddress) {
             // If remote address is private, use it anyway (we'll handle geolocation separately)
             ipAddress = remoteAddress;
+            ipSource = 'connection.remoteAddress (private)';
           }
         }
+        
+        console.log('[UTM Tracking] Extracted IP:', ipAddress, 'Source:', ipSource);
+        console.log('[UTM Tracking] Is localhost/private:', isLocalhostOrPrivate(ipAddress));
         
         // Store original IP for reference
         const originalIpAddress = ipAddress;
@@ -231,17 +256,24 @@ const redirectUtmLink = async (req, res) => {
         // Gets geolocation with timeout to avoid blocking redirect
         const createTrackingRecord = async () => {
             try {
+                console.log('[UTM Tracking] Starting geolocation lookup...');
+                console.log('[UTM Tracking] IP for geolocation (before processing):', ipAddress);
+                
                 // Use the extracted client IP for geolocation
                 // Only use server's public IP if we're actually on localhost (development/testing)
                 let ipForGeolocation = ipAddress;
                 const isDevelopment = process.env.NODE_ENV !== 'production';
                 const isClientLocalhost = ipAddress && isLocalhostOrPrivate(ipAddress);
 
+                console.log('[UTM Tracking] Environment:', isDevelopment ? 'development' : 'production');
+                console.log('[UTM Tracking] Is client localhost:', isClientLocalhost);
+
                 // Only fetch server's public IP if:
                 // 1. We're in development AND the client IP is localhost
                 // 2. This ensures we don't replace real client IPs in production
                 if (isDevelopment && isClientLocalhost && ipAddress) {
                     try {
+                        console.log('[UTM Tracking] [DEV] Attempting to get server public IP...');
                         // Dynamic import for ES module (public-ip v8+)
                         const { publicIpv4 } = await import('public-ip');
                         
@@ -254,14 +286,20 @@ const redirectUtmLink = async (req, res) => {
                         if (publicIpResult) {
                             // Only use server IP if we confirmed client is localhost
                             ipForGeolocation = publicIpResult;
-                            console.log(`[DEV] Using server's public IP ${publicIpResult} for geolocation (client was localhost: ${ipAddress})`);
+                            console.log(`[UTM Tracking] [DEV] Using server's public IP ${publicIpResult} for geolocation (client was localhost: ${ipAddress})`);
+                        } else {
+                            console.log('[UTM Tracking] [DEV] Could not get server public IP (timeout)');
                         }
                     } catch (err) {
                         // If we can't get public IP, use the original IP (geolocation might fail, that's okay)
-                        console.warn('Could not get server public IP for geolocation:', err.message);
+                        console.warn('[UTM Tracking] Could not get server public IP for geolocation:', err.message);
                     }
+                } else {
+                    console.log('[UTM Tracking] Using client IP for geolocation (not fetching server IP)');
                 }
                 // In production: always use the client's IP, even if private (headers should provide public IP)
+                
+                console.log('[UTM Tracking] Final IP for geolocation:', ipForGeolocation);
                 
                 // Try to get geolocation with a short timeout (1.5 seconds max)
                 let geoData = { 
@@ -271,6 +309,7 @@ const redirectUtmLink = async (req, res) => {
                 };
                 if (ipForGeolocation) {
                     try {
+                        console.log('[UTM Tracking] Calling getIpGeolocation with IP:', ipForGeolocation);
                         const geoPromise = getIpGeolocation(ipForGeolocation);
                         const timeoutPromise = new Promise((resolve) => 
                             setTimeout(() => resolve({ 
@@ -280,14 +319,29 @@ const redirectUtmLink = async (req, res) => {
                             }), 1500)
                         );
                         geoData = await Promise.race([geoPromise, timeoutPromise]);
+                        console.log('[UTM Tracking] Geolocation result:', {
+                            country: geoData.country,
+                            city: geoData.city,
+                            hasFullData: !!geoData.full
+                        });
+                        if (geoData.full) {
+                            console.log('[UTM Tracking] Full geodata sample:', {
+                                country: geoData.full.country_code,
+                                country_name: geoData.full.country_name,
+                                city: geoData.full.city,
+                                region: geoData.full.region
+                            });
+                        }
                     } catch (err) {
                         // Ignore geolocation errors - don't block tracking
-                        console.error('Geolocation error (non-blocking):', err.message);
+                        console.error('[UTM Tracking] Geolocation error (non-blocking):', err.message);
                     }
+                } else {
+                    console.warn('[UTM Tracking] No IP available for geolocation');
                 }
 
                 // Create tracking record with all available data including full geodata
-                await utm_tracking.create({
+                const trackingData = {
                     utm_link_id: utmLink.id,
                     code: utmLink.code,
                     ip_address: originalIpAddress, // Store original IP from request
@@ -300,7 +354,22 @@ const redirectUtmLink = async (req, res) => {
                     browser: browser,
                     os: os,
                     clicked_at: new Date()
+                };
+                
+                console.log('[UTM Tracking] Creating tracking record with data:', {
+                    utm_link_id: trackingData.utm_link_id,
+                    code: trackingData.code,
+                    ip_address: trackingData.ip_address,
+                    country: trackingData.country,
+                    city: trackingData.city,
+                    has_geodata: !!trackingData.geodata,
+                    device_type: trackingData.device_type,
+                    browser: trackingData.browser,
+                    os: trackingData.os
                 });
+                
+                const trackingRecord = await utm_tracking.create(trackingData);
+                console.log('[UTM Tracking] Tracking record created successfully with ID:', trackingRecord.id);
             } catch (err) {
                 console.error('Error creating tracking record:', err);
                 // Don't fail the redirect if tracking fails
