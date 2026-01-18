@@ -54,7 +54,7 @@ db.Sequelize = Sequelize;
 
 
 const syncDatabase = async () => {
-  await sequelize.sync({ force: true });
+  // await db.utm_tracking.sync({ force: true });
   console.log('✅ Database synced');
 }
 

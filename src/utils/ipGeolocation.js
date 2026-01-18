@@ -1,13 +1,13 @@
 /**
  * IP Geolocation Utility
- * Gets country and city information from IP address
+ * Gets full geolocation information from IP address
  * Uses free service: ipapi.co
  */
 
 /**
  * Get geolocation data from IP address
  * @param {string} ipAddress - IP address (IPv4 or IPv6)
- * @returns {Promise<Object>} Geolocation data { country, city }
+ * @returns {Promise<Object>} Full geolocation data object with country, city, and all fields
  */
 const getIpGeolocation = async (ipAddress) => {
   // Clean IP address (remove port if present, handle IPv6)
@@ -47,6 +47,7 @@ const getIpGeolocation = async (ipAddress) => {
       cleanIp.startsWith('172.31.') ||
       cleanIp === 'localhost') {
     return {
+      full: null,
       country: null,
       city: null
     }
@@ -65,24 +66,39 @@ const getIpGeolocation = async (ipAddress) => {
     })
 
     if (!response.ok) {
-      return { country: null, city: null }
+      return { 
+        full: null,
+        country: null, 
+        city: null 
+      }
     }
 
     const data = await response.json()
 
     // Handle error responses from ipapi.co
     if (data.error) {
-      return { country: null, city: null }
+      return { 
+        full: null,
+        country: null, 
+        city: null 
+      }
     }
 
+    // Return full geolocation data object along with extracted country and city
+    // Extract country from country_code (ISO 2-letter) or country_code_iso3
+    const countryCode = data.country_code || data.country_code_iso3?.substring(0, 2) || null
+    const city = data.city || null
+
     return {
-      country: data.country_code || null, // ISO 2-letter country code
-      city: data.city || null
+      full: data, // Store the complete geolocation object
+      country: countryCode, // ISO 2-letter country code for backward compatibility
+      city: city
     }
   } catch (error) {
     // Silently fail - don't block redirect if geolocation fails
     console.error('IP geolocation error:', error.message)
     return {
+      full: null,
       country: null,
       city: null
     }

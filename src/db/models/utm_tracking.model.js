@@ -65,6 +65,11 @@ module.exports = (sequelize, DataTypes) => {
     os: {
       type: DataTypes.STRING(100),
       allowNull: true
+    },
+    geodata: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      comment: 'Full geolocation data from IP address'
     }
   }, {
     sequelize,

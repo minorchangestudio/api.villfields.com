@@ -122,7 +122,46 @@ const redirectUtmLink = async (req, res) => {
         const finalUrl = destinationUrl.toString();
 
         // Capture request metadata for tracking
-        const ipAddress = req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+        // Extract IP address - handle production environments with proxies/load balancers
+        let ipAddress = req.ip;
+        
+        // Helper function to check if IP is localhost
+        const isLocalhost = (ip) => {
+          if (!ip) return true;
+          // Remove IPv6 mapping prefix if present
+          const cleaned = ip.replace(/^::ffff:/, '');
+          return cleaned === '::1' || cleaned === '127.0.0.1' || cleaned === 'localhost';
+        };
+        
+        if (!ipAddress || isLocalhost(ipAddress)) {
+          // Try x-forwarded-for header (first IP in comma-separated list)
+          const forwardedFor = req.headers['x-forwarded-for'];
+          if (forwardedFor) {
+            const firstIp = typeof forwardedFor === 'string' 
+              ? forwardedFor.split(',')[0].trim() 
+              : forwardedFor[0];
+            if (firstIp && !isLocalhost(firstIp)) {
+              ipAddress = firstIp;
+            }
+          }
+        }
+        if (!ipAddress || isLocalhost(ipAddress)) {
+          // Fallback to x-real-ip header
+          const realIp = req.headers['x-real-ip'];
+          if (realIp && !isLocalhost(realIp)) {
+            ipAddress = realIp;
+          }
+        }
+        if (!ipAddress || isLocalhost(ipAddress)) {
+          // Final fallback to connection remote address
+          const remoteAddress = req.connection?.remoteAddress || req.socket?.remoteAddress;
+          if (remoteAddress && !isLocalhost(remoteAddress)) {
+            ipAddress = remoteAddress;
+          } else if (!ipAddress) {
+            ipAddress = null;
+          }
+        }
+        
         const userAgent = req.headers['user-agent'] || null;
         const referer = req.headers['referer'] || req.headers['referrer'] || null;
 
@@ -139,12 +178,20 @@ const redirectUtmLink = async (req, res) => {
         const createTrackingRecord = async () => {
             try {
                 // Try to get geolocation with a short timeout (1.5 seconds max)
-                let geoData = { country: null, city: null };
+                let geoData = { 
+                    full: null,
+                    country: null, 
+                    city: null 
+                };
                 if (ipAddress) {
                     try {
                         const geoPromise = getIpGeolocation(ipAddress);
                         const timeoutPromise = new Promise((resolve) => 
-                            setTimeout(() => resolve({ country: null, city: null }), 1500)
+                            setTimeout(() => resolve({ 
+                                full: null,
+                                country: null, 
+                                city: null 
+                            }), 1500)
                         );
                         geoData = await Promise.race([geoPromise, timeoutPromise]);
                     } catch (err) {
@@ -153,7 +200,7 @@ const redirectUtmLink = async (req, res) => {
                     }
                 }
 
-                // Create tracking record with all available data
+                // Create tracking record with all available data including full geodata
                 await utm_tracking.create({
                     utm_link_id: utmLink.id,
                     code: utmLink.code,
@@ -162,6 +209,7 @@ const redirectUtmLink = async (req, res) => {
                     referer: referer,
                     country: geoData.country,
                     city: geoData.city,
+                    geodata: geoData.full, // Store full geolocation object
                     device_type: deviceType,
                     browser: browser,
                     os: os,
