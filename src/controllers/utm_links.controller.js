@@ -122,9 +122,7 @@ const redirectUtmLink = async (req, res) => {
         const finalUrl = destinationUrl.toString();
 
         // Capture request metadata for tracking
-        // Extract IP address - handle production environments with proxies/load balancers
-        let ipAddress = req.ip;
-        
+        // Extract IP address - prioritize headers for production (proxies/load balancers)
         // Helper function to check if IP is localhost or private
         const isLocalhostOrPrivate = (ip) => {
           if (!ip) return true;
@@ -152,30 +150,65 @@ const redirectUtmLink = async (req, res) => {
                  cleaned.startsWith('172.30.') ||
                  cleaned.startsWith('172.31.');
         };
+
+        // Extract client IP with proper priority for production environments
+        let ipAddress = null;
         
-        if (!ipAddress || isLocalhostOrPrivate(ipAddress)) {
-          // Try x-forwarded-for header (first IP in comma-separated list)
-          const forwardedFor = req.headers['x-forwarded-for'];
-          if (forwardedFor) {
-            const firstIp = typeof forwardedFor === 'string' 
-              ? forwardedFor.split(',')[0].trim() 
-              : forwardedFor[0];
-            if (firstIp && !isLocalhostOrPrivate(firstIp)) {
-              ipAddress = firstIp;
+        // 1. First try x-forwarded-for header (contains client IP in production with proxies)
+        // The format is usually: "client-ip, proxy1-ip, proxy2-ip"
+        const forwardedFor = req.headers['x-forwarded-for'];
+        if (forwardedFor) {
+          const ips = typeof forwardedFor === 'string' 
+            ? forwardedFor.split(',').map(ip => ip.trim())
+            : [forwardedFor];
+          
+          // Find first non-private IP (client's real IP is usually first)
+          for (const ip of ips) {
+            if (ip && !isLocalhostOrPrivate(ip)) {
+              ipAddress = ip;
+              break;
             }
           }
         }
+        
+        // 2. Fallback to x-real-ip header (common in nginx)
         if (!ipAddress || isLocalhostOrPrivate(ipAddress)) {
-          // Fallback to x-real-ip header
           const realIp = req.headers['x-real-ip'];
           if (realIp && !isLocalhostOrPrivate(realIp)) {
             ipAddress = realIp;
           }
         }
+        
+        // 3. Try cf-connecting-ip (Cloudflare)
         if (!ipAddress || isLocalhostOrPrivate(ipAddress)) {
-          // Final fallback to connection remote address
+          const cfIp = req.headers['cf-connecting-ip'];
+          if (cfIp && !isLocalhostOrPrivate(cfIp)) {
+            ipAddress = cfIp;
+          }
+        }
+        
+        // 4. Try x-client-ip header
+        if (!ipAddress || isLocalhostOrPrivate(ipAddress)) {
+          const clientIp = req.headers['x-client-ip'];
+          if (clientIp && !isLocalhostOrPrivate(clientIp)) {
+            ipAddress = clientIp;
+          }
+        }
+        
+        // 5. Use req.ip (set by Express trust proxy)
+        if (!ipAddress || isLocalhostOrPrivate(ipAddress)) {
+          if (req.ip && !isLocalhostOrPrivate(req.ip)) {
+            ipAddress = req.ip;
+          }
+        }
+        
+        // 6. Final fallback to connection remote address
+        if (!ipAddress || isLocalhostOrPrivate(ipAddress)) {
           const remoteAddress = req.connection?.remoteAddress || req.socket?.remoteAddress;
           if (remoteAddress && !isLocalhostOrPrivate(remoteAddress)) {
+            ipAddress = remoteAddress;
+          } else if (remoteAddress) {
+            // If remote address is private, use it anyway (we'll handle geolocation separately)
             ipAddress = remoteAddress;
           }
         }
@@ -198,29 +231,37 @@ const redirectUtmLink = async (req, res) => {
         // Gets geolocation with timeout to avoid blocking redirect
         const createTrackingRecord = async () => {
             try {
-                // If IP is localhost/private, try to get public IP for geolocation
+                // Use the extracted client IP for geolocation
+                // Only use server's public IP if we're actually on localhost (development/testing)
                 let ipForGeolocation = ipAddress;
+                const isDevelopment = process.env.NODE_ENV !== 'production';
+                const isClientLocalhost = ipAddress && isLocalhostOrPrivate(ipAddress);
 
-                if (ipAddress && isLocalhostOrPrivate(ipAddress)) {
+                // Only fetch server's public IP if:
+                // 1. We're in development AND the client IP is localhost
+                // 2. This ensures we don't replace real client IPs in production
+                if (isDevelopment && isClientLocalhost && ipAddress) {
                     try {
                         // Dynamic import for ES module (public-ip v8+)
                         const { publicIpv4 } = await import('public-ip');
                         
-                        // Try to get public IP with timeout
+                        // Try to get server's public IP with timeout (for local testing only)
                         const publicIpPromise = publicIpv4();
                         const timeoutPromise = new Promise((resolve) => 
                             setTimeout(() => resolve(null), 1000)
                         );
                         const publicIpResult = await Promise.race([publicIpPromise, timeoutPromise]);
                         if (publicIpResult) {
+                            // Only use server IP if we confirmed client is localhost
                             ipForGeolocation = publicIpResult;
-                            console.log(`Using public IP ${publicIpResult} for geolocation (original: ${ipAddress})`);
+                            console.log(`[DEV] Using server's public IP ${publicIpResult} for geolocation (client was localhost: ${ipAddress})`);
                         }
                     } catch (err) {
-                        // If we can't get public IP, still try with localhost IP (might fail, but that's okay)
-                        console.warn('Could not get public IP for geolocation:', err.message);
+                        // If we can't get public IP, use the original IP (geolocation might fail, that's okay)
+                        console.warn('Could not get server public IP for geolocation:', err.message);
                     }
                 }
+                // In production: always use the client's IP, even if private (headers should provide public IP)
                 
                 // Try to get geolocation with a short timeout (1.5 seconds max)
                 let geoData = { 
