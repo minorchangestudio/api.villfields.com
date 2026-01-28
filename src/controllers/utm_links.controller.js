@@ -26,15 +26,13 @@ const getUtmLinks = async (req, res) => {
             message: "UTM links retrieved successfully"
         });
     } catch (error) {
-        res.status(500).json({ 
+        res.status(500).json({
             status: "error",
-            message: "Error fetching utm links", 
-            error: error.message 
+            message: "Error fetching utm links",
+            error: error.message
         });
     }
 }
-
-
 
 const createUtmLink = async (req, res) => {
     try {
@@ -42,8 +40,8 @@ const createUtmLink = async (req, res) => {
 
         // Validation
         if (!destinationUrl || !utmSource || !utmMedium) {
-            return res.status(400).json({ 
-                message: "Missing required fields: destinationUrl, utmSource, and utmMedium are required" 
+            return res.status(400).json({
+                message: "Missing required fields: destinationUrl, utmSource, and utmMedium are required"
             });
         }
 
@@ -110,11 +108,11 @@ const redirectUtmLink = async (req, res) => {
         const destinationUrl = new URL(utmLink.destination_url);
         destinationUrl.searchParams.append('utm_source', utmLink.utm_source);
         destinationUrl.searchParams.append('utm_medium', utmLink.utm_medium);
-        
+
         if (utmLink.utm_campaign) {
             destinationUrl.searchParams.append('utm_campaign', utmLink.utm_campaign);
         }
-        
+
         if (utmLink.utm_content) {
             destinationUrl.searchParams.append('utm_content', utmLink.utm_content);
         }
@@ -125,116 +123,116 @@ const redirectUtmLink = async (req, res) => {
         // Extract IP address - prioritize headers for production (proxies/load balancers)
         // Helper function to check if IP is localhost or private
         const isLocalhostOrPrivate = (ip) => {
-          if (!ip) return true;
-          // Remove IPv6 mapping prefix if present
-          const cleaned = ip.replace(/^::ffff:/, '');
-          return cleaned === '::1' || 
-                 cleaned === '127.0.0.1' || 
-                 cleaned === 'localhost' ||
-                 cleaned.startsWith('192.168.') || 
-                 cleaned.startsWith('10.') || 
-                 cleaned.startsWith('172.16.') ||
-                 cleaned.startsWith('172.17.') ||
-                 cleaned.startsWith('172.18.') ||
-                 cleaned.startsWith('172.19.') ||
-                 cleaned.startsWith('172.20.') ||
-                 cleaned.startsWith('172.21.') ||
-                 cleaned.startsWith('172.22.') ||
-                 cleaned.startsWith('172.23.') ||
-                 cleaned.startsWith('172.24.') ||
-                 cleaned.startsWith('172.25.') ||
-                 cleaned.startsWith('172.26.') ||
-                 cleaned.startsWith('172.27.') ||
-                 cleaned.startsWith('172.28.') ||
-                 cleaned.startsWith('172.29.') ||
-                 cleaned.startsWith('172.30.') ||
-                 cleaned.startsWith('172.31.');
+            if (!ip) return true;
+            // Remove IPv6 mapping prefix if present
+            const cleaned = ip.replace(/^::ffff:/, '');
+            return cleaned === '::1' ||
+                cleaned === '127.0.0.1' ||
+                cleaned === 'localhost' ||
+                cleaned.startsWith('192.168.') ||
+                cleaned.startsWith('10.') ||
+                cleaned.startsWith('172.16.') ||
+                cleaned.startsWith('172.17.') ||
+                cleaned.startsWith('172.18.') ||
+                cleaned.startsWith('172.19.') ||
+                cleaned.startsWith('172.20.') ||
+                cleaned.startsWith('172.21.') ||
+                cleaned.startsWith('172.22.') ||
+                cleaned.startsWith('172.23.') ||
+                cleaned.startsWith('172.24.') ||
+                cleaned.startsWith('172.25.') ||
+                cleaned.startsWith('172.26.') ||
+                cleaned.startsWith('172.27.') ||
+                cleaned.startsWith('172.28.') ||
+                cleaned.startsWith('172.29.') ||
+                cleaned.startsWith('172.30.') ||
+                cleaned.startsWith('172.31.');
         };
 
         // Extract client IP with proper priority for production environments
         let ipAddress = null;
         let ipSource = 'none';
-        
+
         // 0. FIRST PRIORITY: Custom header from Next.js (x-client-real-ip)
         // This is set by Next.js with the real client IP and won't be overwritten by internal proxies
         const clientRealIp = req.headers['x-client-real-ip'];
         if (clientRealIp && !isLocalhostOrPrivate(clientRealIp)) {
-          ipAddress = clientRealIp;
-          ipSource = 'x-client-real-ip (from Next.js)';
+            ipAddress = clientRealIp;
+            ipSource = 'x-client-real-ip (from Next.js)';
         }
-        
+
         // 1. Try x-forwarded-for header (contains client IP in production with proxies)
         // The format is usually: "client-ip, proxy1-ip, proxy2-ip"
         // Only check this if we didn't get IP from x-client-real-ip
         if (!ipAddress || isLocalhostOrPrivate(ipAddress)) {
-          const forwardedFor = req.headers['x-forwarded-for'];
-          if (forwardedFor) {
-            const ips = typeof forwardedFor === 'string' 
-              ? forwardedFor.split(',').map(ip => ip.trim())
-              : [forwardedFor];
-            
-            // Find first non-private IP (client's real IP is usually first)
-            for (const ip of ips) {
-              if (ip && !isLocalhostOrPrivate(ip)) {
-                ipAddress = ip;
-                ipSource = 'x-forwarded-for';
-                break;
-              }
+            const forwardedFor = req.headers['x-forwarded-for'];
+            if (forwardedFor) {
+                const ips = typeof forwardedFor === 'string'
+                    ? forwardedFor.split(',').map(ip => ip.trim())
+                    : [forwardedFor];
+
+                // Find first non-private IP (client's real IP is usually first)
+                for (const ip of ips) {
+                    if (ip && !isLocalhostOrPrivate(ip)) {
+                        ipAddress = ip;
+                        ipSource = 'x-forwarded-for';
+                        break;
+                    }
+                }
             }
-          }
         }
-        
+
         // 2. Fallback to x-real-ip header (common in nginx)
         if (!ipAddress || isLocalhostOrPrivate(ipAddress)) {
-          const realIp = req.headers['x-real-ip'];
-          if (realIp && !isLocalhostOrPrivate(realIp)) {
-            ipAddress = realIp;
-            ipSource = 'x-real-ip';
-          }
+            const realIp = req.headers['x-real-ip'];
+            if (realIp && !isLocalhostOrPrivate(realIp)) {
+                ipAddress = realIp;
+                ipSource = 'x-real-ip';
+            }
         }
-        
+
         // 3. Try cf-connecting-ip (Cloudflare)
         if (!ipAddress || isLocalhostOrPrivate(ipAddress)) {
-          const cfIp = req.headers['cf-connecting-ip'];
-          if (cfIp && !isLocalhostOrPrivate(cfIp)) {
-            ipAddress = cfIp;
-            ipSource = 'cf-connecting-ip';
-          }
+            const cfIp = req.headers['cf-connecting-ip'];
+            if (cfIp && !isLocalhostOrPrivate(cfIp)) {
+                ipAddress = cfIp;
+                ipSource = 'cf-connecting-ip';
+            }
         }
-        
+
         // 4. Try x-client-ip header
         if (!ipAddress || isLocalhostOrPrivate(ipAddress)) {
-          const clientIp = req.headers['x-client-ip'];
-          if (clientIp && !isLocalhostOrPrivate(clientIp)) {
-            ipAddress = clientIp;
-            ipSource = 'x-client-ip';
-          }
+            const clientIp = req.headers['x-client-ip'];
+            if (clientIp && !isLocalhostOrPrivate(clientIp)) {
+                ipAddress = clientIp;
+                ipSource = 'x-client-ip';
+            }
         }
-        
+
         // 5. Use req.ip (set by Express trust proxy)
         if (!ipAddress || isLocalhostOrPrivate(ipAddress)) {
-          if (req.ip && !isLocalhostOrPrivate(req.ip)) {
-            ipAddress = req.ip;
-            ipSource = 'req.ip';
-          }
+            if (req.ip && !isLocalhostOrPrivate(req.ip)) {
+                ipAddress = req.ip;
+                ipSource = 'req.ip';
+            }
         }
-        
+
         // 6. Final fallback to connection remote address
         if (!ipAddress || isLocalhostOrPrivate(ipAddress)) {
-          const remoteAddress = req.connection?.remoteAddress || req.socket?.remoteAddress;
-          if (remoteAddress && !isLocalhostOrPrivate(remoteAddress)) {
-            ipAddress = remoteAddress;
-            ipSource = 'connection.remoteAddress';
-          } else if (remoteAddress) {
-            // If remote address is private, use it anyway (we'll handle geolocation separately)
-            ipAddress = remoteAddress;
-            ipSource = 'connection.remoteAddress (private)';
-          }
+            const remoteAddress = req.connection?.remoteAddress || req.socket?.remoteAddress;
+            if (remoteAddress && !isLocalhostOrPrivate(remoteAddress)) {
+                ipAddress = remoteAddress;
+                ipSource = 'connection.remoteAddress';
+            } else if (remoteAddress) {
+                // If remote address is private, use it anyway (we'll handle geolocation separately)
+                ipAddress = remoteAddress;
+                ipSource = 'connection.remoteAddress (private)';
+            }
         }
-        
+
         // Store original IP for reference
         const originalIpAddress = ipAddress;
-        
+
         const userAgent = req.headers['user-agent'] || null;
         const referer = req.headers['referer'] || req.headers['referrer'] || null;
 
@@ -263,10 +261,10 @@ const redirectUtmLink = async (req, res) => {
                     try {
                         // Dynamic import for ES module (public-ip v8+)
                         const { publicIpv4 } = await import('public-ip');
-                        
+
                         // Try to get server's public IP with timeout (for local testing only)
                         const publicIpPromise = publicIpv4();
-                        const timeoutPromise = new Promise((resolve) => 
+                        const timeoutPromise = new Promise((resolve) =>
                             setTimeout(() => resolve(null), 1000)
                         );
                         const publicIpResult = await Promise.race([publicIpPromise, timeoutPromise]);
@@ -280,21 +278,21 @@ const redirectUtmLink = async (req, res) => {
                     }
                 }
                 // In production: always use the client's IP, even if private (headers should provide public IP)
-                
+
                 // Try to get geolocation with a short timeout (1.5 seconds max)
-                let geoData = { 
+                let geoData = {
                     full: null,
-                    country: null, 
-                    city: null 
+                    country: null,
+                    city: null
                 };
                 if (ipForGeolocation) {
                     try {
                         const geoPromise = getIpGeolocation(ipForGeolocation);
-                        const timeoutPromise = new Promise((resolve) => 
-                            setTimeout(() => resolve({ 
+                        const timeoutPromise = new Promise((resolve) =>
+                            setTimeout(() => resolve({
                                 full: null,
-                                country: null, 
-                                city: null 
+                                country: null,
+                                city: null
                             }), 1500)
                         );
                         geoData = await Promise.race([geoPromise, timeoutPromise]);
@@ -336,4 +334,53 @@ const redirectUtmLink = async (req, res) => {
     }
 }
 
-module.exports = { createUtmLink, getUtmLinks, redirectUtmLink };
+
+// updateUtmLink
+const updateUtmLink = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { destinationUrl, utmSource, utmMedium, utmCampaign, utmContent } = req.body;
+
+        const utmLink = await utm_links.findOne({
+            where: { id }
+        });
+
+        if (!utmLink) {
+            return res.status(404).json({ message: "UTM link not found" });
+        }
+
+        utmLink.destination_url = destinationUrl;
+        utmLink.utm_source = utmSource;
+        utmLink.utm_medium = utmMedium;
+        utmLink.utm_campaign = utmCampaign;
+        utmLink.utm_content = utmContent;
+        await utmLink.save();
+
+        return res.status(200).json({ message: "UTM link updated successfully" });
+    } catch (error) {
+        console.error('Error updating UTM link:', error);
+        res.status(500).json({ message: "Error updating utm link", error: error.message });
+    }
+}
+
+// deleteUtmLink
+const deleteUtmLink = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const utmLink = await utm_links.findOne({
+            where: { id }
+        });
+
+        if (!utmLink) {
+            return res.status(404).json({ message: "UTM link not found" });
+        }
+
+        await utmLink.destroy();
+
+        return res.status(200).json({ message: "UTM link deleted successfully" });
+    } catch (error) {
+        console.error('Error deleting UTM link:', error);
+        res.status(500).json({ message: "Error deleting utm link", error: error.message });
+    }
+}
+module.exports = { createUtmLink, getUtmLinks, redirectUtmLink, updateUtmLink, deleteUtmLink };
