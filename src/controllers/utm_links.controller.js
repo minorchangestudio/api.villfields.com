@@ -383,4 +383,169 @@ const deleteUtmLink = async (req, res) => {
         res.status(500).json({ message: "Error deleting utm link", error: error.message });
     }
 }
-module.exports = { createUtmLink, getUtmLinks, redirectUtmLink, updateUtmLink, deleteUtmLink };
+const getUtmLinkAnalytics = async (req, res) => {
+    try {
+        const { code } = req.params;
+
+        if (!code) {
+            return res.status(400).json({ message: "Code parameter is required" });
+        }
+
+        // Find UTM link by code
+        const utmLink = await utm_links.findOne({
+            where: { code }
+        });
+
+        if (!utmLink) {
+            return res.status(404).json({ message: "UTM link not found" });
+        }
+
+        // Get all tracking data for this link
+        const trackingData = await utm_tracking.findAll({
+            where: { utm_link_id: utmLink.id },
+            order: [['clicked_at', 'ASC']]
+        });
+
+        // Calculate overview stats
+        const totalClicks = trackingData.length;
+        const uniqueIPs = new Set(trackingData.map(t => t.ip_address).filter(Boolean)).size;
+        const uniqueCountries = new Set(trackingData.map(t => t.country).filter(Boolean)).size;
+
+        // Time series data (clicks per day)
+        const timeSeriesMap = new Map();
+        trackingData.forEach(track => {
+            const date = new Date(track.clicked_at).toISOString().split('T')[0];
+            timeSeriesMap.set(date, (timeSeriesMap.get(date) || 0) + 1);
+        });
+        const timeSeries = Array.from(timeSeriesMap.entries())
+            .map(([date, clicks]) => ({ date, clicks }))
+            .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+        // Country distribution
+        const countryMap = new Map();
+        trackingData.forEach(track => {
+            const country = track.country || 'Unknown';
+            countryMap.set(country, (countryMap.get(country) || 0) + 1);
+        });
+        const countryDistribution = Array.from(countryMap.entries())
+            .map(([country, count]) => ({ country, count }))
+            .sort((a, b) => b.count - a.count);
+
+        // City distribution
+        const cityMap = new Map();
+        trackingData.forEach(track => {
+            const city = track.city || 'Unknown';
+            const key = `${city}${track.country ? `, ${track.country}` : ''}`;
+            cityMap.set(key, (cityMap.get(key) || 0) + 1);
+        });
+        const cityDistribution = Array.from(cityMap.entries())
+            .map(([city, count]) => ({ city, count }))
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 10); // Top 10 cities
+
+        // Device type distribution
+        const deviceMap = new Map();
+        trackingData.forEach(track => {
+            const device = track.device_type || 'Unknown';
+            deviceMap.set(device, (deviceMap.get(device) || 0) + 1);
+        });
+        const deviceDistribution = Array.from(deviceMap.entries())
+            .map(([device, count]) => ({ device, count }))
+            .sort((a, b) => b.count - a.count);
+
+        // Browser distribution
+        const browserMap = new Map();
+        trackingData.forEach(track => {
+            const browser = track.browser || 'Unknown';
+            browserMap.set(browser, (browserMap.get(browser) || 0) + 1);
+        });
+        const browserDistribution = Array.from(browserMap.entries())
+            .map(([browser, count]) => ({ browser, count }))
+            .sort((a, b) => b.count - a.count);
+
+        // OS distribution
+        const osMap = new Map();
+        trackingData.forEach(track => {
+            const os = track.os || 'Unknown';
+            osMap.set(os, (osMap.get(os) || 0) + 1);
+        });
+        const osDistribution = Array.from(osMap.entries())
+            .map(([os, count]) => ({ os, count }))
+            .sort((a, b) => b.count - a.count);
+
+        // Referer distribution
+        const refererMap = new Map();
+        trackingData.forEach(track => {
+            const referer = track.referer || 'Direct';
+            refererMap.set(referer, (refererMap.get(referer) || 0) + 1);
+        });
+        const refererDistribution = Array.from(refererMap.entries())
+            .map(([referer, count]) => ({ referer, count }))
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 10); // Top 10 referers
+
+        // Hourly distribution (clicks per hour of day)
+        const hourlyMap = new Map();
+        for (let i = 0; i < 24; i++) {
+            hourlyMap.set(i, 0);
+        }
+        trackingData.forEach(track => {
+            const hour = new Date(track.clicked_at).getHours();
+            hourlyMap.set(hour, (hourlyMap.get(hour) || 0) + 1);
+        });
+        const hourlyDistribution = Array.from(hourlyMap.entries())
+            .map(([hour, count]) => ({ hour: parseInt(hour), count }))
+            .sort((a, b) => a.hour - b.hour);
+
+        // Weekly distribution (clicks per day of week)
+        const weeklyMap = new Map();
+        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        days.forEach(day => weeklyMap.set(day, 0));
+        trackingData.forEach(track => {
+            const day = days[new Date(track.clicked_at).getDay()];
+            weeklyMap.set(day, (weeklyMap.get(day) || 0) + 1);
+        });
+        const weeklyDistribution = Array.from(weeklyMap.entries())
+            .map(([day, count]) => ({ day, count }));
+
+        res.status(200).json({
+            status: "success",
+            data: {
+                link: {
+                    id: utmLink.id,
+                    code: utmLink.code,
+                    destinationUrl: utmLink.destination_url,
+                    utmSource: utmLink.utm_source,
+                    utmMedium: utmLink.utm_medium,
+                    utmCampaign: utmLink.utm_campaign,
+                    utmContent: utmLink.utm_content,
+                    isActive: utmLink.is_active,
+                    createdAt: utmLink.created_at
+                },
+                overview: {
+                    totalClicks,
+                    uniqueIPs,
+                    uniqueCountries
+                },
+                timeSeries,
+                countryDistribution,
+                cityDistribution,
+                deviceDistribution,
+                browserDistribution,
+                osDistribution,
+                refererDistribution,
+                hourlyDistribution,
+                weeklyDistribution
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching UTM link analytics:', error);
+        res.status(500).json({
+            status: "error",
+            message: "Error fetching analytics",
+            error: error.message
+        });
+    }
+}
+
+module.exports = { createUtmLink, getUtmLinks, redirectUtmLink, updateUtmLink, deleteUtmLink, getUtmLinkAnalytics };
