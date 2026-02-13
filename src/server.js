@@ -36,6 +36,13 @@ app.get('/site-info', (req, res) => {
   var siteData = {}
 
   switch (siteName) {
+    case 'iconyxsolutions':
+      siteData = {
+        name: 'Iconyx Solutions',
+        siteURL: 'https://iconyxsolutions.com',
+        db: 'iconyxsolutions',
+      };
+      break;
     case 'villfields':
       siteData = {
         name: 'Vill Fields',
